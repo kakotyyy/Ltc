@@ -101,6 +101,21 @@ def calculate_adx(df: pd.DataFrame, period: int = 14):
     return adx
 
 
+def calculate_rsi_series(series: pd.Series, period: int = 14) -> pd.Series:
+    if HAS_TALIB:
+        try:
+            return pd.Series(talib.RSI(series.values.astype(float), timeperiod=period), index=series.index)
+        except Exception:
+            pass
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / (avg_loss + 1e-12)
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
 # ---------------------------------------------------------
 # Page Configuration
 # ---------------------------------------------------------
@@ -652,6 +667,153 @@ st.markdown("""
         padding-bottom: 2.5rem !important;
         max-width: 1200px !important;
     }
+
+    /* Backtest Custom Elements */
+    .strategy-rule-card {
+        background: linear-gradient(145deg, rgba(236, 72, 153, 0.08) 0%, rgba(18, 22, 34, 0.95) 100%);
+        border: 1px solid rgba(236, 72, 153, 0.35);
+        border-radius: 16px;
+        padding: 22px 26px;
+        margin-bottom: 20px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px rgba(236, 72, 153, 0.1);
+    }
+    .rule-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        margin: 3px 4px 3px 0;
+    }
+    .rule-pill-alert {
+        background: rgba(236, 72, 153, 0.15);
+        color: #f472b6;
+        border: 1px solid rgba(236, 72, 153, 0.3);
+    }
+    .rule-pill-entry {
+        background: rgba(0, 208, 156, 0.15);
+        color: #00d09c;
+        border: 1px solid rgba(0, 208, 156, 0.3);
+    }
+    .rule-pill-exit {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .rule-pill-rank {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c084fc;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+    .bt-stat-card {
+        background: #11151f;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 16px 18px;
+        text-align: center;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .bt-stat-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(0, 208, 156, 0.4);
+    }
+    .bt-stat-label {
+        color: #8b949e;
+        font-size: 0.76rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+    }
+    .bt-stat-val {
+        font-size: 1.45rem;
+        font-weight: 800;
+        letter-spacing: -0.3px;
+        color: #ffffff;
+    }
+    .bt-stat-sub {
+        font-size: 0.78rem;
+        font-weight: 600;
+        margin-top: 4px;
+    }
+    .pnl-positive {
+        color: #00d09c !important;
+    }
+    .pnl-negative {
+        color: #ef4444 !important;
+    }
+    .pnl-neutral {
+        color: #94a3b8 !important;
+    }
+
+    /* Monthly P&L Matrix Styling */
+    .monthly-matrix-wrapper {
+        overflow-x: auto;
+        margin: 16px 0 24px 0;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: #11151f;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .monthly-matrix-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 4px;
+        font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+        font-size: 0.86rem;
+    }
+    .monthly-matrix-table th {
+        background: #181d2a;
+        color: #94a3b8;
+        font-weight: 700;
+        padding: 12px 10px;
+        text-align: center;
+        letter-spacing: 0.5px;
+        border-radius: 6px;
+    }
+    .monthly-matrix-table th.ytd-header {
+        background: rgba(168, 85, 247, 0.2);
+        color: #c084fc;
+        font-weight: 800;
+    }
+    .monthly-matrix-table td {
+        padding: 10px 8px;
+        text-align: center;
+        border-radius: 8px;
+        font-weight: 600;
+    }
+    .monthly-matrix-table td.year-col {
+        background: #181d2a;
+        color: #f1f5f9;
+        font-weight: 700;
+    }
+    .monthly-matrix-table td.cell-pos {
+        background: rgba(0, 208, 156, 0.14);
+        color: #00d09c;
+    }
+    .monthly-matrix-table td.cell-neg {
+        background: rgba(239, 68, 68, 0.14);
+        color: #ef4444;
+    }
+    .monthly-matrix-table td.cell-empty {
+        background: rgba(255, 255, 255, 0.02);
+        color: #475569;
+    }
+    .monthly-matrix-table td.cell-ytd-pos {
+        background: linear-gradient(135deg, rgba(0, 208, 156, 0.22), rgba(0, 208, 156, 0.35));
+        color: #00e5ab;
+        font-weight: 800;
+        border: 1px solid rgba(0, 208, 156, 0.4);
+    }
+    .monthly-matrix-table td.cell-ytd-neg {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(239, 68, 68, 0.35));
+        color: #f87171;
+        font-weight: 800;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -679,8 +841,31 @@ POPULAR_NSE_STOCKS = {
 # ---------------------------------------------------------
 # Session State Init
 # ---------------------------------------------------------
+# Synchronize current_page with browser URL query parameters for Back / Forward button support
+valid_pages = ["Home", "Download Stock Data", "Screener", "Heatmap", "Heatmap_Historical", "Heatmap_Live", "Backtest"]
+query_page = st.query_params.get("page", None)
+
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "Home"
+    st.session_state.current_page = query_page if query_page in valid_pages else "Home"
+elif query_page and query_page in valid_pages and query_page != st.session_state.current_page:
+    # URL changed (e.g. browser back/forward button clicked)
+    st.session_state.current_page = query_page
+else:
+    # Synchronize URL with active session_state
+    if st.session_state.current_page == "Home":
+        if "page" in st.query_params:
+            del st.query_params["page"]
+    else:
+        st.query_params["page"] = st.session_state.current_page
+
+def navigate_to(page_name: str):
+    st.session_state.current_page = page_name
+    if page_name == "Home":
+        if "page" in st.query_params:
+            del st.query_params["page"]
+    else:
+        st.query_params["page"] = page_name
+    st.rerun()
 
 if "stock_data" not in st.session_state:
     st.session_state.stock_data = None
@@ -698,6 +883,17 @@ if "heatmap_raw_tickers" not in st.session_state:
     st.session_state.heatmap_raw_tickers = []
 if "heatmap_filename" not in st.session_state:
     st.session_state.heatmap_filename = None
+
+if "backtest_raw_tickers" not in st.session_state:
+    st.session_state.backtest_raw_tickers = []
+if "backtest_filename" not in st.session_state:
+    st.session_state.backtest_filename = None
+if "backtest_results" not in st.session_state:
+    st.session_state.backtest_results = None
+if "bt_start_date" not in st.session_state:
+    st.session_state.bt_start_date = date.today() - timedelta(days=3*365)
+if "bt_end_date" not in st.session_state:
+    st.session_state.bt_end_date = date.today()
 
 
 # ---------------------------------------------------------
@@ -855,6 +1051,445 @@ def fetch_heatmap_data(symbols_tuple: tuple, timeframe_choice: str):
 
 
 # ---------------------------------------------------------
+# Helper function to fetch Backtest data (cached)
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=600)
+def fetch_backtest_market_data(symbols_tuple: tuple, fetch_start_date: str, fetch_end_date: str):
+    symbols = list(symbols_tuple)
+    if not symbols:
+        return {}
+
+    try:
+        raw_bulk = yf.download(
+            tickers=symbols,
+            start=fetch_start_date,
+            end=fetch_end_date,
+            interval="1d",
+            group_by="ticker",
+            progress=False,
+            auto_adjust=False,
+            threads=True
+        )
+    except Exception:
+        raw_bulk = pd.DataFrame()
+
+    processed_dict = {}
+    for sym in symbols:
+        t_df = pd.DataFrame()
+        if not raw_bulk.empty:
+            if len(symbols) == 1:
+                t_df = raw_bulk.copy()
+            elif hasattr(raw_bulk.columns, "levels") and sym in raw_bulk.columns.levels[0]:
+                t_df = raw_bulk[sym].dropna(how="all").copy()
+            elif sym in raw_bulk.columns:
+                t_df = raw_bulk[sym].dropna(how="all").copy()
+
+        if isinstance(t_df.columns, pd.MultiIndex):
+            t_df.columns = [c[0] if isinstance(c, tuple) else c for c in t_df.columns]
+
+        if not t_df.empty and "Close" in t_df.columns and len(t_df.dropna(subset=["Close"])) > 10:
+            t_df = t_df.reset_index()
+            if "Date" in t_df.columns:
+                t_df["Date"] = pd.to_datetime(t_df["Date"]).dt.tz_localize(None)
+            elif "Datetime" in t_df.columns:
+                t_df.rename(columns={"Datetime": "Date"}, inplace=True)
+                t_df["Date"] = pd.to_datetime(t_df["Date"]).dt.tz_localize(None)
+
+            t_df.set_index("Date", inplace=True)
+            t_df.sort_index(inplace=True)
+
+            # Precompute Technical Indicators
+            t_df["SMA_200"] = t_df["Close"].rolling(200).mean()
+            t_df["Prev5_Max"] = t_df["Close"].shift(1).rolling(5).max()
+            t_df["RSI"] = calculate_rsi_series(t_df["Close"], period=14)
+
+            processed_dict[sym] = t_df
+
+    return processed_dict
+
+
+# ---------------------------------------------------------
+# Core Strategy 1 Simulation Engine
+# ---------------------------------------------------------
+def execute_strategy_1_simulation(
+    universe_dict: dict,
+    sim_start_date: date,
+    sim_end_date: date,
+    initial_cash: float,
+    slot_count: int,
+    compounding_mode: bool
+):
+    start_ts = pd.to_datetime(sim_start_date)
+    end_ts = pd.to_datetime(sim_end_date)
+
+    all_trading_dates = sorted(list(set.union(*[
+        set(df.loc[(df.index >= start_ts) & (df.index <= end_ts)].index)
+        for df in universe_dict.values() if not df.empty
+    ])))
+
+    if not all_trading_dates:
+        return None
+
+    cash = float(initial_cash)
+    fixed_slot_capital = float(initial_cash) / max(1, slot_count)
+    positions = {}  # sym -> dict(entry_date, entry_price, shares, cost, rsi)
+    pending_exits = set()
+    pending_entries = []  # list of dict(sym, rsi)
+    closed_trades = []
+    daily_records = []
+
+    for cur_dt in all_trading_dates:
+        # 1. Execute Pending Exits at today's candle Open
+        for sym in list(pending_exits):
+            if sym in positions:
+                pos = positions[sym]
+                df = universe_dict[sym]
+                if cur_dt in df.index and not np.isnan(df.loc[cur_dt, "Open"]):
+                    open_p = float(df.loc[cur_dt, "Open"])
+                else:
+                    open_p = float(pos["entry_price"])
+
+                proceeds = pos["shares"] * open_p
+                cash += proceeds
+                trade_pnl = proceeds - pos["cost"]
+                trade_pnl_pct = ((open_p - pos["entry_price"]) / pos["entry_price"]) * 100.0 if pos["entry_price"] > 0 else 0.0
+                holding_days = max(1, (cur_dt - pos["entry_date"]).days)
+
+                closed_trades.append({
+                    "ticker": sym,
+                    "symbol": sym.replace(".NS", "").replace(".BO", ""),
+                    "entry_date": pos["entry_date"].strftime("%Y-%m-%d"),
+                    "entry_price": round(pos["entry_price"], 2),
+                    "exit_date": cur_dt.strftime("%Y-%m-%d"),
+                    "exit_price": round(open_p, 2),
+                    "shares": pos["shares"],
+                    "invested": round(pos["cost"], 2),
+                    "exit_value": round(proceeds, 2),
+                    "pnl": round(trade_pnl, 2),
+                    "pnl_pct": round(trade_pnl_pct, 2),
+                    "holding_days": holding_days,
+                    "rsi_at_entry": round(pos.get("rsi", 0.0), 1),
+                    "outcome": "WIN" if trade_pnl > 0 else ("LOSS" if trade_pnl < 0 else "BE")
+                })
+                del positions[sym]
+        pending_exits.clear()
+
+        # 2. Execute Pending Entries at today's candle Open
+        for item in pending_entries:
+            sym = item["sym"]
+            if len(positions) < slot_count and sym not in positions:
+                df = universe_dict[sym]
+                if cur_dt in df.index and not np.isnan(df.loc[cur_dt, "Open"]):
+                    open_p = float(df.loc[cur_dt, "Open"])
+                    if compounding_mode:
+                        est_equity = cash + sum(p["shares"] * p["entry_price"] for p in positions.values())
+                        target_slot_cap = min(cash, max(100.0, est_equity / slot_count))
+                    else:
+                        target_slot_cap = min(cash, fixed_slot_capital)
+
+                    if open_p > 0:
+                        shares = int(target_slot_cap // open_p)
+                        if shares > 0:
+                            trade_cost = shares * open_p
+                            cash -= trade_cost
+                            positions[sym] = {
+                                "entry_date": cur_dt,
+                                "entry_price": open_p,
+                                "shares": shares,
+                                "cost": trade_cost,
+                                "rsi": item["rsi"]
+                            }
+        pending_entries.clear()
+
+        # 3. Mark to Market Portfolio Valuation at today's Close
+        invested_val = 0.0
+        for sym, pos in positions.items():
+            df = universe_dict[sym]
+            if cur_dt in df.index and not np.isnan(df.loc[cur_dt, "Close"]):
+                close_p = float(df.loc[cur_dt, "Close"])
+            else:
+                close_p = float(pos["entry_price"])
+            invested_val += pos["shares"] * close_p
+
+        total_equity = cash + invested_val
+        daily_records.append({
+            "Date": cur_dt,
+            "Equity": total_equity,
+            "Cash": cash,
+            "Invested": invested_val,
+            "ActiveTrades": len(positions)
+        })
+
+        # 4. End-of-Day Alerts for Next Day Execution
+        # Exit Alerts: Today's close is more than max(previous 5 closes)
+        for sym in positions:
+            df = universe_dict[sym]
+            if cur_dt in df.index:
+                c = float(df.loc[cur_dt, "Close"])
+                p5 = float(df.loc[cur_dt, "Prev5_Max"])
+                if not np.isnan(c) and not np.isnan(p5) and c > p5:
+                    pending_exits.add(sym)
+
+        # Entry Alerts: Today's close < max(5 previous closes) AND Today's close > 200 DMA
+        slots_available_tomorrow = slot_count - (len(positions) - len(pending_exits))
+        if slots_available_tomorrow > 0:
+            candidates = []
+            for sym, df in universe_dict.items():
+                if sym not in positions and sym not in pending_exits and cur_dt in df.index:
+                    c = float(df.loc[cur_dt, "Close"])
+                    p5 = float(df.loc[cur_dt, "Prev5_Max"])
+                    dma200 = float(df.loc[cur_dt, "SMA_200"])
+                    rsi_val = float(df.loc[cur_dt, "RSI"])
+
+                    if not np.isnan(c) and not np.isnan(p5) and not np.isnan(dma200) and not np.isnan(rsi_val):
+                        if c < p5 and c > dma200:
+                            candidates.append({"sym": sym, "rsi": rsi_val})
+
+            if candidates:
+                # Priority Ranking: Rank based on RSI value (Higher ranked first)
+                candidates.sort(key=lambda x: x["rsi"], reverse=True)
+                for cand in candidates[:slots_available_tomorrow]:
+                    pending_entries.append(cand)
+
+    # Active open positions at simulation end
+    open_positions = []
+    final_dt = all_trading_dates[-1]
+    for sym, pos in positions.items():
+        df = universe_dict[sym]
+        last_c = float(df.loc[final_dt, "Close"]) if (final_dt in df.index and not np.isnan(df.loc[final_dt, "Close"])) else float(pos["entry_price"])
+        cur_val = pos["shares"] * last_c
+        unrealized_pnl = cur_val - pos["cost"]
+        unrealized_pnl_pct = ((last_c - pos["entry_price"]) / pos["entry_price"]) * 100.0 if pos["entry_price"] > 0 else 0.0
+        open_positions.append({
+            "ticker": sym,
+            "symbol": sym.replace(".NS", "").replace(".BO", ""),
+            "entry_date": pos["entry_date"].strftime("%Y-%m-%d"),
+            "entry_price": round(pos["entry_price"], 2),
+            "current_price": round(last_c, 2),
+            "shares": pos["shares"],
+            "invested": round(pos["cost"], 2),
+            "current_value": round(cur_val, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round(unrealized_pnl_pct, 2),
+            "holding_days": max(1, (final_dt - pos["entry_date"]).days),
+            "rsi_at_entry": round(pos.get("rsi", 0.0), 1)
+        })
+
+    df_daily = pd.DataFrame(daily_records)
+    final_equity = df_daily["Equity"].iloc[-1] if not df_daily.empty else initial_cash
+    net_profit = final_equity - initial_cash
+    net_profit_pct = (net_profit / initial_cash) * 100.0
+
+    # Drawdown calculation
+    eq_series = df_daily["Equity"]
+    peaks = eq_series.cummax()
+    dd_series = (eq_series - peaks) / peaks * 100.0
+    df_daily["Drawdown_Pct"] = dd_series
+    max_dd_pct = abs(dd_series.min()) if not dd_series.empty else 0.0
+    max_dd_amount = abs((eq_series - peaks).min()) if not eq_series.empty else 0.0
+
+    # Time duration & CAGR
+    days_total = max(1, (all_trading_dates[-1] - all_trading_dates[0]).days)
+    years_total = days_total / 365.25
+    cagr = (((final_equity / initial_cash) ** (1.0 / years_total)) - 1.0) * 100.0 if (years_total > 0.1 and final_equity > 0) else net_profit_pct
+
+    # Closed trade metrics
+    total_closed = len(closed_trades)
+    wins = [t for t in closed_trades if t["pnl"] > 0]
+    losses = [t for t in closed_trades if t["pnl"] < 0]
+    win_rate = (len(wins) / total_closed * 100.0) if total_closed > 0 else 0.0
+
+    gross_win = sum(t["pnl"] for t in wins)
+    gross_loss = abs(sum(t["pnl"] for t in losses))
+    profit_factor = (gross_win / gross_loss) if gross_loss > 0 else (999.0 if gross_win > 0 else 0.0)
+
+    avg_return_per_trade = np.mean([t["pnl_pct"] for t in closed_trades]) if total_closed > 0 else 0.0
+    avg_win_pct = np.mean([t["pnl_pct"] for t in wins]) if wins else 0.0
+    avg_loss_pct = np.mean([t["pnl_pct"] for t in losses]) if losses else 0.0
+    avg_hold_days = np.mean([t["holding_days"] for t in closed_trades]) if total_closed > 0 else 0.0
+
+    # Universe Equal-Weight Buy & Hold Benchmark
+    valid_bench_syms = [s for s, d in universe_dict.items() if not d.empty and all_trading_dates[0] in d.index and all_trading_dates[-1] in d.index]
+    if valid_bench_syms:
+        norm_list = []
+        for s in valid_bench_syms:
+            d = universe_dict[s]
+            sc = d.loc[d.index.isin(all_trading_dates), "Close"].reindex(all_trading_dates).ffill().bfill()
+            if not sc.empty and sc.iloc[0] > 0:
+                norm_list.append(sc / sc.iloc[0])
+        if norm_list:
+            bench_norm = pd.concat(norm_list, axis=1).mean(axis=1)
+            df_daily["Benchmark_Equity"] = bench_norm.values * initial_cash
+            bench_return_pct = (bench_norm.iloc[-1] - 1.0) * 100.0
+        else:
+            df_daily["Benchmark_Equity"] = initial_cash
+            bench_return_pct = 0.0
+    else:
+        df_daily["Benchmark_Equity"] = initial_cash
+        bench_return_pct = 0.0
+
+    bench_cagr = ((( (df_daily["Benchmark_Equity"].iloc[-1] / initial_cash) ) ** (1.0 / years_total)) - 1.0) * 100.0 if (years_total > 0.1 and df_daily["Benchmark_Equity"].iloc[-1] > 0) else bench_return_pct
+
+    return {
+        "daily_df": df_daily,
+        "closed_trades": closed_trades,
+        "open_positions": open_positions,
+        "initial_capital": initial_cash,
+        "final_equity": round(final_equity, 2),
+        "net_profit": round(net_profit, 2),
+        "net_profit_pct": round(net_profit_pct, 2),
+        "cagr": round(cagr, 2),
+        "bench_return_pct": round(bench_return_pct, 2),
+        "bench_cagr": round(bench_cagr, 2),
+        "max_dd_pct": round(max_dd_pct, 2),
+        "max_dd_amount": round(max_dd_amount, 2),
+        "total_trades": total_closed,
+        "wins_count": len(wins),
+        "losses_count": len(losses),
+        "win_rate": round(win_rate, 1),
+        "profit_factor": round(profit_factor, 2),
+        "gross_win": round(gross_win, 2),
+        "gross_loss": round(gross_loss, 2),
+        "avg_trade_return": round(avg_return_per_trade, 2),
+        "avg_win_pct": round(avg_win_pct, 2),
+        "avg_loss_pct": round(avg_loss_pct, 2),
+        "avg_hold_days": round(avg_hold_days, 1),
+        "trading_days": len(all_trading_dates),
+        "years_total": round(years_total, 2),
+        "start_date": all_trading_dates[0].strftime("%Y-%m-%d"),
+        "end_date": all_trading_dates[-1].strftime("%Y-%m-%d")
+    }
+
+
+# ---------------------------------------------------------
+# Helper function to generate Year-Wise Monthly P&L Matrix
+# ---------------------------------------------------------
+def generate_monthly_pnl_matrix(df_daily: pd.DataFrame, initial_capital: float):
+    if df_daily.empty or "Date" not in df_daily.columns or "Equity" not in df_daily.columns:
+        return pd.DataFrame(), pd.DataFrame(), {}
+
+    df = df_daily.copy()
+    df["Date"] = pd.to_datetime(df["Date"])
+    df.set_index("Date", inplace=True)
+    df.sort_index(inplace=True)
+
+    years = sorted(list(set(df.index.year)))
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    records_pct = []
+    records_pnl = []
+    all_months_stats = []
+
+    prev_end_eq = float(initial_capital)
+
+    for y in years:
+        y_df = df.loc[df.index.year == y]
+        row_pct = {"Year": str(y)}
+        row_pnl = {"Year": str(y)}
+        y_start_eq = prev_end_eq
+
+        for m in range(1, 13):
+            m_df = y_df.loc[y_df.index.month == m]
+            m_key = month_names[m - 1]
+            if not m_df.empty:
+                m_end_eq = float(m_df["Equity"].iloc[-1])
+                m_ret = ((m_end_eq - prev_end_eq) / prev_end_eq) * 100.0 if prev_end_eq > 0 else 0.0
+                m_pnl_val = m_end_eq - prev_end_eq
+
+                row_pct[m_key] = round(m_ret, 2)
+                row_pnl[m_key] = round(m_pnl_val, 2)
+                all_months_stats.append({
+                    "Period": f"{m_key} {y}",
+                    "Return_Pct": m_ret,
+                    "Pnl_Cash": m_pnl_val,
+                    "Year": y,
+                    "Month": m
+                })
+                prev_end_eq = m_end_eq
+            else:
+                row_pct[m_key] = None
+                row_pnl[m_key] = None
+
+        y_end_eq = float(y_df["Equity"].iloc[-1])
+        y_ret = ((y_end_eq - y_start_eq) / y_start_eq) * 100.0 if y_start_eq > 0 else 0.0
+        y_pnl_val = y_end_eq - y_start_eq
+
+        row_pct["YTD"] = round(y_ret, 2)
+        row_pnl["YTD"] = round(y_pnl_val, 2)
+
+        records_pct.append(row_pct)
+        records_pnl.append(row_pnl)
+
+    df_pct = pd.DataFrame(records_pct)
+    df_pnl = pd.DataFrame(records_pnl)
+
+    stats_summary = {}
+    if all_months_stats:
+        best_m = max(all_months_stats, key=lambda x: x["Return_Pct"])
+        worst_m = min(all_months_stats, key=lambda x: x["Return_Pct"])
+        pos_months = [m for m in all_months_stats if m["Return_Pct"] > 0]
+        neg_months = [m for m in all_months_stats if m["Return_Pct"] < 0]
+        avg_ret = np.mean([m["Return_Pct"] for m in all_months_stats])
+
+        stats_summary = {
+            "total_months": len(all_months_stats),
+            "pos_months_count": len(pos_months),
+            "neg_months_count": len(neg_months),
+            "pos_rate": round(len(pos_months) / len(all_months_stats) * 100.0, 1),
+            "best_month": best_m["Period"],
+            "best_month_pct": round(best_m["Return_Pct"], 2),
+            "worst_month": worst_m["Period"],
+            "worst_month_pct": round(worst_m["Return_Pct"], 2),
+            "avg_month_pct": round(avg_ret, 2),
+            "monthly_list": all_months_stats
+        }
+
+    return df_pct, df_pnl, stats_summary
+
+
+def render_monthly_html_table(df_matrix: pd.DataFrame, is_currency: bool = False) -> str:
+    if df_matrix.empty:
+        return "<p style='color: #94a3b8;'>No monthly data available.</p>"
+
+    month_cols = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    html = ['<div class="monthly-matrix-wrapper"><table class="monthly-matrix-table">']
+    html.append("<thead><tr><th>Year</th>")
+    for m in month_cols:
+        html.append(f"<th>{m}</th>")
+    html.append('<th class="ytd-header">Total YTD</th></tr></thead><tbody>')
+
+    for _, row in df_matrix.iterrows():
+        y = row["Year"]
+        html.append(f'<tr><td class="year-col">{y}</td>')
+        for m in month_cols:
+            val = row[m]
+            if val is None or pd.isna(val):
+                html.append('<td class="cell-empty">-</td>')
+            else:
+                formatted_val = f"{'+' if val > 0 else ''}₹{val:,.0f}" if is_currency else f"{'+' if val > 0 else ''}{val:.2f}%"
+                if val > 0:
+                    html.append(f'<td class="cell-pos">{formatted_val}</td>')
+                elif val < 0:
+                    html.append(f'<td class="cell-neg">{formatted_val}</td>')
+                else:
+                    html.append(f'<td class="cell-empty">{formatted_val}</td>')
+        ytd_val = row["YTD"]
+        if ytd_val is None or pd.isna(ytd_val):
+            html.append('<td class="cell-empty">-</td>')
+        else:
+            formatted_ytd = f"{'+' if ytd_val > 0 else ''}₹{ytd_val:,.0f}" if is_currency else f"{'+' if ytd_val > 0 else ''}{ytd_val:.2f}%"
+            if ytd_val > 0:
+                html.append(f'<td class="cell-ytd-pos">{formatted_ytd}</td>')
+            elif ytd_val < 0:
+                html.append(f'<td class="cell-ytd-neg">{formatted_ytd}</td>')
+            else:
+                html.append(f'<td class="cell-empty">{formatted_ytd}</td>')
+        html.append("</tr>")
+    html.append("</tbody></table></div>")
+    return "".join(html)
+
+
+# ---------------------------------------------------------
 # Top Header Bar
 # ---------------------------------------------------------
 st.markdown("""
@@ -897,8 +1532,7 @@ if st.session_state.current_page == "Home":
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open Stock Data", key="btn_nav_stock", type="primary", use_container_width=True):
-            st.session_state.current_page = "Download Stock Data"
-            st.rerun()
+            navigate_to("Download Stock Data")
 
     with col_c2:
         st.markdown("""
@@ -912,8 +1546,7 @@ if st.session_state.current_page == "Home":
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open Screener", key="btn_nav_screener", type="primary", use_container_width=True):
-            st.session_state.current_page = "Screener"
-            st.rerun()
+            navigate_to("Screener")
 
     with col_c3:
         st.markdown("""
@@ -927,8 +1560,7 @@ if st.session_state.current_page == "Home":
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open Heatmap", key="btn_nav_heatmap", type="primary", use_container_width=True):
-            st.session_state.current_page = "Heatmap"
-            st.rerun()
+            navigate_to("Heatmap")
 
     with col_c4:
         st.markdown("""
@@ -941,17 +1573,15 @@ if st.session_state.current_page == "Home":
             <div style="font-size: 0.82rem; font-weight: 700; color: #f472b6; letter-spacing: 0.5px;">SIMULATE →</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Open Backtest", key="btn_nav_backtest", type="secondary", use_container_width=True):
-            st.session_state.current_page = "Backtest"
-            st.rerun()
+        if st.button("Open Backtest", key="btn_nav_backtest", type="primary", use_container_width=True):
+            navigate_to("Backtest")
 
 
 elif st.session_state.current_page == "Heatmap":
     top_nav_h1, top_nav_h2 = st.columns([1, 6])
     with top_nav_h1:
         if st.button("← Back", key="heatmap_home_back"):
-            st.session_state.current_page = "Home"
-            st.rerun()
+            navigate_to("Home")
     with top_nav_h2:
         st.markdown("<h2 class='gradient-header-text'>Market Heatmap</h2>", unsafe_allow_html=True)
 
@@ -970,8 +1600,7 @@ elif st.session_state.current_page == "Heatmap":
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open Historical Heatmap", key="btn_nav_heatmap_hist", type="primary", use_container_width=True):
-            st.session_state.current_page = "Heatmap_Historical"
-            st.rerun()
+            navigate_to("Heatmap_Historical")
 
     with sub_col2:
         st.markdown("""
@@ -985,8 +1614,7 @@ elif st.session_state.current_page == "Heatmap":
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open Live Heatmap", key="btn_nav_heatmap_live", type="secondary", use_container_width=True):
-            st.session_state.current_page = "Heatmap_Live"
-            st.rerun()
+            navigate_to("Heatmap_Live")
 
 
 # ---------------------------------------------------------
@@ -996,8 +1624,7 @@ elif st.session_state.current_page == "Heatmap_Live":
     top_nav_l1, top_nav_l2 = st.columns([1, 6])
     with top_nav_l1:
         if st.button("← Back", key="heatmap_live_back"):
-            st.session_state.current_page = "Heatmap"
-            st.rerun()
+            navigate_to("Heatmap")
     with top_nav_l2:
         st.markdown("<h2 class='gradient-header-text'>Live Market Heatmap</h2>", unsafe_allow_html=True)
 
@@ -1019,8 +1646,7 @@ elif st.session_state.current_page == "Heatmap_Historical":
     top_nav_hh1, top_nav_hh2 = st.columns([1, 6])
     with top_nav_hh1:
         if st.button("← Back", key="heatmap_hist_back"):
-            st.session_state.current_page = "Heatmap"
-            st.rerun()
+            navigate_to("Heatmap")
     with top_nav_hh2:
         st.markdown("<h2 class='gradient-header-text'>Historical Market Heatmap</h2>", unsafe_allow_html=True)
 
@@ -1274,26 +1900,703 @@ elif st.session_state.current_page == "Heatmap_Historical":
 
 
 # ---------------------------------------------------------
-# BACKTEST PLACEHOLDER PAGE
+# BACKTEST STRATEGY SIMULATION PAGE
 # ---------------------------------------------------------
 elif st.session_state.current_page == "Backtest":
     top_nav_b1, top_nav_b2 = st.columns([1, 6])
     with top_nav_b1:
         if st.button("← Back", key="backtest_back"):
-            st.session_state.current_page = "Home"
-            st.rerun()
+            navigate_to("Home")
     with top_nav_b2:
-        st.markdown("<h2 class='gradient-header-text'>Backtest Strategy</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 class='gradient-header-text'>Algorithmic Strategy Backtest</h2>", unsafe_allow_html=True)
+        st.caption("Multi-stock cross-sectional portfolio simulation with technical indicators, dynamic ranking & risk controls")
 
-    st.markdown("""
-    <div class="neon-card neon-glow-pink" style="margin-top: 16px; padding: 48px; text-align: center; align-items: center;">
-        <span class="neon-card-badge badge-pink">Under Construction</span>
-        <div class="neon-card-title" style="margin-top: 14px; font-size: 1.8rem;">Backtest Engine</div>
-        <div class="neon-card-desc" style="max-width: 540px; margin: 12px auto; font-size: 0.95rem;">
-            Strategy simulation engine will be implemented here. Backtest indicator rules, view trade logs, calculate win-rate, profit factor, and visualize equity curves.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 30 liquid Nifty 50 sample stocks
+    nifty_30_sample_backtest = [
+        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+        "BHARTIARTL", "ITC", "LT", "MARUTI", "BAJFINANCE",
+        "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+        "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+        "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M", "GRASIM"
+    ]
+
+    # Section 1: Strategy Selection & Rules Card
+    with st.expander("📌 Strategy Selection & Execution Rules", expanded=(st.session_state.backtest_results is None)):
+        strat_c1, strat_c2 = st.columns([1.5, 1])
+        with strat_c1:
+            selected_strategy = st.selectbox(
+                "Select Trading Strategy",
+                options=[
+                    "Strategy 1: Long Only - 5-Day Dip & Breakout (200 DMA + RSI Rank)",
+                    "Strategy 2: 200 DMA + Supertrend Breakout [Coming Soon]",
+                    "Strategy 3: RSI Extreme Mean Reversion [Coming Soon]"
+                ],
+                index=0,
+                key="bt_selected_strategy"
+            )
+        with strat_c2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            st.markdown("<span class='badge-live'>Active Quant Engine</span>", unsafe_allow_html=True)
+
+        if "Strategy 1" in selected_strategy:
+            st.markdown("""
+            <div class="strategy-rule-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 1.15rem; font-weight: 700; color: #ffffff; letter-spacing: -0.2px;">
+                        Strategy 1: Long-Only 5-Day Dip Pullback above 200 DMA
+                    </div>
+                    <span class="neon-card-badge badge-green" style="margin: 0;">Verified Logic</span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;">
+                    <span class="rule-pill rule-pill-alert">🚨 Alert: Close &lt; Max(5 Prev Closes) &amp; Close &gt; 200 DMA</span>
+                    <span class="rule-pill rule-pill-entry">🟢 Entry: Next Candle Open</span>
+                    <span class="rule-pill rule-pill-exit">🚪 Exit Alert: Close &gt; Max(5 Prev Closes) &rarr; Next Open</span>
+                    <span class="rule-pill rule-pill-rank">🏆 Priority: Rank by RSI(14) Descending</span>
+                    <span class="rule-pill rule-pill-alert">🔒 Cap: Max 10 Concurrent Trades</span>
+                </div>
+                <div style="font-size: 0.88rem; color: #94a3b8; line-height: 1.6;">
+                    • <strong>Initial Capital:</strong> ₹1,00,000 divided equally across 10 stocks (₹10,000 allocated per stock slot).<br/>
+                    • <strong>Cross-Sectional Ranking:</strong> When more qualifying signals occur than open slots, candidate stocks are ranked by their <strong>RSI (14)</strong> value from highest to lowest, and trades are executed exclusively on the highest ranked stocks.<br/>
+                    • <strong>Strict Capacity Limit:</strong> If 10 trades are already running, 0 new entries are taken even if fresh signals trigger. Slots are freed only when open trades exit.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("This strategy template will be unlocked soon. Please select Strategy 1 to run simulation.")
+
+    # Section 2: Universe & Stock Selection
+    with st.expander("📂 Universe & Ticker Selection", expanded=(len(st.session_state.backtest_raw_tickers) == 0)):
+        u_col1, u_col2 = st.columns([2, 1])
+        with u_col1:
+            uploaded_bt_csv = st.file_uploader("Upload CSV containing stock tickers", type=["csv"], key="bt_csv_uploader")
+
+            col_btn_u1, col_btn_u2 = st.columns([1.3, 1])
+            with col_btn_u1:
+                if st.button("🚀 Run on Sample Stocks (30 Nifty Stocks)", key="btn_run_bt_sample", use_container_width=True):
+                    st.session_state.backtest_raw_tickers = nifty_30_sample_backtest
+                    st.session_state.backtest_filename = "Nifty 50 (30 Liquid Sample Stocks)"
+                    st.session_state.backtest_results = None
+                    st.rerun()
+            with col_btn_u2:
+                if st.session_state.backtest_filename or len(st.session_state.backtest_raw_tickers) > 0:
+                    if st.button("🔄 Reset Universe", key="btn_reset_bt_stocks", use_container_width=True):
+                        st.session_state.backtest_raw_tickers = []
+                        st.session_state.backtest_filename = None
+                        st.session_state.backtest_results = None
+                        st.rerun()
+
+            if uploaded_bt_csv is not None:
+                try:
+                    uploaded_bt_csv.seek(0)
+                    csv_df = pd.read_csv(uploaded_bt_csv)
+                    found_col = None
+                    for col_name in ["symbol", "ticker", "stock", "symbols", "tickers", "stocks", "name", "tradingsymbol"]:
+                        for actual_col in csv_df.columns:
+                            if str(actual_col).strip().lower() == col_name:
+                                found_col = actual_col
+                                break
+                        if found_col:
+                            break
+                    if found_col is None:
+                        found_col = csv_df.columns[0]
+
+                    parsed_list = (
+                        csv_df[found_col]
+                        .dropna()
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
+                        .tolist()
+                    )
+                    parsed_list = [t for t in parsed_list if t and t not in ["SYMBOL", "TICKER", "STOCK"]]
+                    if parsed_list:
+                        st.session_state.backtest_raw_tickers = parsed_list
+                        st.session_state.backtest_filename = uploaded_bt_csv.name
+                        st.session_state.backtest_results = None
+                        st.caption(f"✓ Loaded {len(parsed_list)} tickers from {uploaded_bt_csv.name}")
+                except Exception as e:
+                    st.error(f"Error parsing CSV: {e}")
+
+        with u_col2:
+            bt_exchange = st.selectbox("Exchange Format", ["NSE (.NS)", "BSE (.BO)", "US / None"], index=0, key="bt_exchange")
+
+            def format_bt_ticker(tick: str, ex_setting: str) -> str:
+                tick = tick.strip().upper()
+                if "NSE" in ex_setting and not tick.endswith(".NS"):
+                    return f"{tick.split('.')[0]}.NS"
+                elif "BSE" in ex_setting and not tick.endswith(".BO"):
+                    return f"{tick.split('.')[0]}.BO"
+                return tick
+
+            formatted_bt_tickers = [
+                format_bt_ticker(t, bt_exchange)
+                for t in st.session_state.backtest_raw_tickers
+            ]
+
+            if st.session_state.backtest_filename:
+                st.markdown(f"**Active Universe:** {st.session_state.backtest_filename}")
+                st.caption(f"Total: {len(formatted_bt_tickers)} stocks")
+
+        if formatted_bt_tickers:
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+            pills_html = "".join([f"<span class='ticker-pill'>{t.replace('.NS', '').replace('.BO', '')}</span>" for t in formatted_bt_tickers[:30]])
+            if len(formatted_bt_tickers) > 30:
+                pills_html += f"<span style='color: #8b949e; font-size: 0.8rem; margin-left: 6px;'>+{len(formatted_bt_tickers)-30} more</span>"
+            st.markdown(pills_html, unsafe_allow_html=True)
+
+    # Section 3: Testing Time Period & Parameters
+    with st.expander("⚙️ Testing Time Period & Capital Parameters", expanded=(st.session_state.backtest_results is None)):
+        tp_c1, tp_c2 = st.columns(2)
+        with tp_c1:
+            bt_start = st.date_input("From (Start Date)", value=st.session_state.bt_start_date, max_value=date.today(), key="input_bt_start")
+            st.session_state.bt_start_date = bt_start
+        with tp_c2:
+            bt_end = st.date_input("To (End Date)", value=st.session_state.bt_end_date, max_value=date.today(), key="input_bt_end")
+            st.session_state.bt_end_date = bt_end
+
+        # Fast preset buttons
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+        with col_p1:
+            if st.button("1 Year", key="btn_quick_1y", use_container_width=True):
+                st.session_state.bt_start_date = date.today() - timedelta(days=365)
+                st.session_state.bt_end_date = date.today()
+                st.session_state.backtest_results = None
+                st.rerun()
+        with col_p2:
+            if st.button("2 Years", key="btn_quick_2y", use_container_width=True):
+                st.session_state.bt_start_date = date.today() - timedelta(days=2*365)
+                st.session_state.bt_end_date = date.today()
+                st.session_state.backtest_results = None
+                st.rerun()
+        with col_p3:
+            if st.button("3 Years", key="btn_quick_3y", use_container_width=True):
+                st.session_state.bt_start_date = date.today() - timedelta(days=3*365)
+                st.session_state.bt_end_date = date.today()
+                st.session_state.backtest_results = None
+                st.rerun()
+        with col_p4:
+            if st.button("5 Years", key="btn_quick_5y", use_container_width=True):
+                st.session_state.bt_start_date = date.today() - timedelta(days=5*365)
+                st.session_state.bt_end_date = date.today()
+                st.session_state.backtest_results = None
+                st.rerun()
+        with col_p5:
+            if st.button("YTD", key="btn_quick_ytd", use_container_width=True):
+                st.session_state.bt_start_date = date(date.today().year, 1, 1)
+                st.session_state.bt_end_date = date.today()
+                st.session_state.backtest_results = None
+                st.rerun()
+
+        st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 16px 0;'/>", unsafe_allow_html=True)
+
+        cap_c1, cap_c2, cap_c3 = st.columns(3)
+        with cap_c1:
+            bt_initial_capital = st.number_input(
+                "Initial Capital (₹)",
+                min_value=10000.0,
+                max_value=10000000.0,
+                value=100000.0,
+                step=10000.0,
+                key="input_bt_capital",
+                help="Our starting portfolio capital (Default: Rs. 100,000)"
+            )
+        with cap_c2:
+            bt_max_positions = st.number_input(
+                "Max Concurrent Trades (Slots)",
+                min_value=1,
+                max_value=50,
+                value=10,
+                step=1,
+                key="input_bt_max_positions",
+                help="Capital is divided equally into this number of stocks (Default: 10 stocks)"
+            )
+        with cap_c3:
+            bt_sizing_mode = st.selectbox(
+                "Position Sizing Mode",
+                options=[
+                    "Equal Division of Initial Capital (₹10,000 / slot)",
+                    "Dynamic Compounding (10% of Current Equity / slot)"
+                ],
+                index=0,
+                key="input_bt_sizing_mode",
+                help="Fixed capital allocation per slot or dynamic reinvestment"
+            )
+
+    # ---------------------------------------------------------
+    # Run Backtest Button Trigger
+    # ---------------------------------------------------------
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    btn_run_sim = st.button("🚀 Run Strategy Backtest", type="primary", use_container_width=True)
+
+    if btn_run_sim:
+        if not formatted_bt_tickers:
+            st.error("Please select or upload stock tickers first! Click '🚀 Run on Sample Stocks (30 Nifty Stocks)' above to get started.")
+        elif bt_start >= bt_end:
+            st.error("Start Date must be before End Date!")
+        else:
+            with st.status("Running Strategy Simulation...", expanded=True) as sim_status:
+                st.write(f"📡 Fetching data for {len(formatted_bt_tickers)} stocks with 400-day 200 DMA warmup lookback...")
+                # 420 calendar days lookback buffer gives >280 trading days for 200 DMA & RSI
+                warmup_start = bt_start - timedelta(days=420)
+                download_end = bt_end + timedelta(days=1)
+
+                market_data = fetch_backtest_market_data(
+                    tuple(formatted_bt_tickers),
+                    warmup_start.strftime("%Y-%m-%d"),
+                    download_end.strftime("%Y-%m-%d")
+                )
+
+                valid_stocks = [s for s, df in market_data.items() if len(df) > 205]
+                st.write(f"✓ Loaded {len(valid_stocks)} stocks with complete 200 DMA indicator history.")
+
+                if not valid_stocks:
+                    st.error("Not enough historical data returned to compute 200 DMA. Please expand date range or check exchange symbols.")
+                else:
+                    st.write("⚙️ Simulating daily execution, cash allocation & RSI cross-sectional ranking...")
+                    is_compounding = "Dynamic" in bt_sizing_mode
+                    res = execute_strategy_1_simulation(
+                        market_data,
+                        bt_start,
+                        bt_end,
+                        float(bt_initial_capital),
+                        int(bt_max_positions),
+                        is_compounding
+                    )
+                    if res:
+                        st.session_state.backtest_results = res
+                        sim_status.update(label="Simulation Complete! 🎉", state="complete", expanded=False)
+                    else:
+                        st.error("No trading dates found in the selected range.")
+
+    # ---------------------------------------------------------
+    # Render Backtest Performance Dashboard
+    # ---------------------------------------------------------
+    if st.session_state.backtest_results is not None:
+        r = st.session_state.backtest_results
+        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+
+        # Top KPI Metrics Grid (6 Columns)
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+        with k1:
+            pnl_cls = "pnl-positive" if r["net_profit"] >= 0 else "pnl-negative"
+            pnl_sign = "+" if r["net_profit"] >= 0 else ""
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">Ending Equity</div>
+                <div class="bt-stat-val">₹{r['final_equity']:,.0f}</div>
+                <div class="bt-stat-sub {pnl_cls}">{pnl_sign}₹{r['net_profit']:,.0f} ({pnl_sign}{r['net_profit_pct']:.1f}%)</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k2:
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">Win Rate</div>
+                <div class="bt-stat-val pnl-positive">{r['win_rate']:.1f}%</div>
+                <div class="bt-stat-sub pnl-neutral">{r['wins_count']} Wins / {r['losses_count']} Losses</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k3:
+            pf_val = "∞" if r['profit_factor'] >= 999 else f"{r['profit_factor']:.2f}"
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">Profit Factor</div>
+                <div class="bt-stat-val">{pf_val}</div>
+                <div class="bt-stat-sub pnl-neutral">₹{r['gross_win']:,.0f} / ₹{r['gross_loss']:,.0f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k4:
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">Max Drawdown</div>
+                <div class="bt-stat-val pnl-negative">-{r['max_dd_pct']:.1f}%</div>
+                <div class="bt-stat-sub pnl-neutral">-₹{r['max_dd_amount']:,.0f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k5:
+            alpha = r['cagr'] - r['bench_cagr']
+            alpha_sign = "+" if alpha >= 0 else ""
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">CAGR (Annual)</div>
+                <div class="bt-stat-val">{r['cagr']:.1f}%</div>
+                <div class="bt-stat-sub pnl-positive">Alpha: {alpha_sign}{alpha:.1f}% vs B&amp;H</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k6:
+            st.markdown(f"""
+            <div class="bt-stat-card">
+                <div class="bt-stat-label">Total Trades</div>
+                <div class="bt-stat-val">{r['total_trades']}</div>
+                <div class="bt-stat-sub pnl-neutral">Avg Hold: {r['avg_hold_days']}d | {r['avg_trade_return']:+.1f}%</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+
+        # Tabbed Visualizations & Analytics
+        tab_chart, tab_monthly, tab_trades, tab_open, tab_analytics = st.tabs([
+            "📊 Portfolio Equity Curve",
+            "📅 Monthly & Yearly P&L",
+            f"📋 Closed Trades Log ({r['total_trades']})",
+            f"📌 Open Positions ({len(r['open_positions'])})",
+            "📈 Drawdown & Risk Analytics"
+        ])
+
+        # --- TAB 1: EQUITY CURVE ---
+        with tab_chart:
+            df_d = r["daily_df"]
+            fig_eq = go.Figure()
+
+            # Benchmark Buy & Hold Line
+            if "Benchmark_Equity" in df_d.columns:
+                fig_eq.add_trace(go.Scatter(
+                    x=df_d["Date"],
+                    y=df_d["Benchmark_Equity"],
+                    mode="lines",
+                    name="Universe Equal-Weight Buy & Hold",
+                    line=dict(color="rgba(6, 182, 212, 0.75)", width=2, dash="dot"),
+                    hovertemplate="Benchmark: ₹%{y:,.0f}<extra></extra>"
+                ))
+
+            # Strategy Equity Area Curve
+            fig_eq.add_trace(go.Scatter(
+                x=df_d["Date"],
+                y=df_d["Equity"],
+                mode="lines",
+                name="Strategy 1 Equity",
+                line=dict(color="#00d09c", width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(0, 208, 156, 0.12)",
+                hovertemplate="Strategy Equity: ₹%{y:,.0f}<extra></extra>"
+            ))
+
+            # Initial Capital Baseline
+            fig_eq.add_hline(
+                y=r["initial_capital"],
+                line_dash="dash",
+                line_color="rgba(255, 255, 255, 0.25)",
+                annotation_text=f"Initial Capital (₹{r['initial_capital']:,.0f})",
+                annotation_position="bottom right"
+            )
+
+            fig_eq.update_layout(
+                template="plotly_dark",
+                height=480,
+                margin=dict(l=15, r=15, t=25, b=15),
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)"),
+                yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)", title="Portfolio Value (₹)"),
+                plot_bgcolor="#0c1017",
+                paper_bgcolor="#0c1017"
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
+
+            # Strategy vs Benchmark Comparative Breakdown
+            st.markdown("<h4 style='color: #ffffff; margin-top: 10px;'>Benchmark Comparison Summary</h4>", unsafe_allow_html=True)
+            comp_df = pd.DataFrame([
+                {
+                    "Metric": "Starting Capital",
+                    "Strategy 1 (Dip & Breakout)": f"₹{r['initial_capital']:,.0f}",
+                    "Equal-Weight Buy & Hold": f"₹{r['initial_capital']:,.0f}",
+                    "Advantage": "-"
+                },
+                {
+                    "Metric": "Ending Portfolio Value",
+                    "Strategy 1 (Dip & Breakout)": f"₹{r['final_equity']:,.0f}",
+                    "Equal-Weight Buy & Hold": f"₹{df_d['Benchmark_Equity'].iloc[-1]:,.0f}" if 'Benchmark_Equity' in df_d.columns else "-",
+                    "Advantage": f"{'+' if r['final_equity'] >= df_d['Benchmark_Equity'].iloc[-1] else ''}₹{r['final_equity'] - df_d['Benchmark_Equity'].iloc[-1]:,.0f}" if 'Benchmark_Equity' in df_d.columns else "-"
+                },
+                {
+                    "Metric": "Total Net Return %",
+                    "Strategy 1 (Dip & Breakout)": f"{r['net_profit_pct']:+.1f}%",
+                    "Equal-Weight Buy & Hold": f"{r['bench_return_pct']:+.1f}%",
+                    "Advantage": f"{r['net_profit_pct'] - r['bench_return_pct']:+.1f}%"
+                },
+                {
+                    "Metric": "Annualized Return (CAGR)",
+                    "Strategy 1 (Dip & Breakout)": f"{r['cagr']:.1f}%",
+                    "Equal-Weight Buy & Hold": f"{r['bench_cagr']:.1f}%",
+                    "Advantage": f"{r['cagr'] - r['bench_cagr']:+.1f}%"
+                },
+                {
+                    "Metric": "Maximum Drawdown",
+                    "Strategy 1 (Dip & Breakout)": f"-{r['max_dd_pct']:.1f}%",
+                    "Equal-Weight Buy & Hold": f"-{abs(((df_d['Benchmark_Equity'] - df_d['Benchmark_Equity'].cummax()) / df_d['Benchmark_Equity'].cummax() * 100).min()):.1f}%" if 'Benchmark_Equity' in df_d.columns else "-",
+                    "Advantage": "Lower Risk" if r['max_dd_pct'] < abs(((df_d['Benchmark_Equity'] - df_d['Benchmark_Equity'].cummax()) / df_d['Benchmark_Equity'].cummax() * 100).min()) else "Standard"
+                }
+            ])
+            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+        # --- TAB 2: YEAR-WISE MONTHLY P&L MATRIX ---
+        with tab_monthly:
+            st.markdown("<h4 style='color: #ffffff; margin-bottom: 4px;'>Year-Wise Monthly P&L Matrix</h4>", unsafe_allow_html=True)
+            st.caption("Comprehensive calendar breakdown of strategy returns across all years and months")
+
+            df_pct, df_pnl, m_stats = generate_monthly_pnl_matrix(r["daily_df"], r["initial_capital"])
+
+            if not df_pct.empty:
+                # Top Mini KPI Row for Monthly Performance
+                if m_stats:
+                    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                    with m_col1:
+                        st.markdown(f"""
+                        <div class="bt-stat-card" style="padding: 12px 14px;">
+                            <div class="bt-stat-label">Best Month</div>
+                            <div class="bt-stat-val pnl-positive" style="font-size: 1.25rem;">+{m_stats['best_month_pct']:.2f}%</div>
+                            <div class="bt-stat-sub pnl-neutral">{m_stats['best_month']}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with m_col2:
+                        st.markdown(f"""
+                        <div class="bt-stat-card" style="padding: 12px 14px;">
+                            <div class="bt-stat-label">Worst Month</div>
+                            <div class="bt-stat-val pnl-negative" style="font-size: 1.25rem;">{m_stats['worst_month_pct']:.2f}%</div>
+                            <div class="bt-stat-sub pnl-neutral">{m_stats['worst_month']}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with m_col3:
+                        st.markdown(f"""
+                        <div class="bt-stat-card" style="padding: 12px 14px;">
+                            <div class="bt-stat-label">Profitable Months</div>
+                            <div class="bt-stat-val pnl-positive" style="font-size: 1.25rem;">{m_stats['pos_rate']:.1f}%</div>
+                            <div class="bt-stat-sub pnl-neutral">{m_stats['pos_months_count']} Green / {m_stats['neg_months_count']} Red</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with m_col4:
+                        avg_cls = "pnl-positive" if m_stats['avg_month_pct'] >= 0 else "pnl-negative"
+                        st.markdown(f"""
+                        <div class="bt-stat-card" style="padding: 12px 14px;">
+                            <div class="bt-stat-label">Average Monthly Return</div>
+                            <div class="bt-stat-val {avg_cls}" style="font-size: 1.25rem;">{'+' if m_stats['avg_month_pct'] >= 0 else ''}{m_stats['avg_month_pct']:.2f}%</div>
+                            <div class="bt-stat-sub pnl-neutral">Across {m_stats['total_months']} Active Months</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+                # Controls: View Mode & Download Button
+                m_ctrl1, m_ctrl2 = st.columns([2, 1])
+                with m_ctrl1:
+                    monthly_view_mode = st.radio(
+                        "Display Units",
+                        ["Percentage Return (%)", "Net P&L Amount (₹)"],
+                        horizontal=True,
+                        key="bt_monthly_view_mode"
+                    )
+                with m_ctrl2:
+                    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+                    is_pnl_mode = "Amount" in monthly_view_mode
+                    export_df = df_pnl if is_pnl_mode else df_pct
+                    csv_monthly_bytes = export_df.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "📥 Export Monthly Table CSV",
+                        data=csv_monthly_bytes,
+                        file_name=f"monthly_pnl_{r['start_date']}_{r['end_date']}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+                # Render HTML Table
+                is_curr_mode = "Amount" in monthly_view_mode
+                selected_matrix = df_pnl if is_curr_mode else df_pct
+                st.markdown(render_monthly_html_table(selected_matrix, is_currency=is_curr_mode), unsafe_allow_html=True)
+
+                # Interactive Monthly Distribution Bar Chart
+                if m_stats and "monthly_list" in m_stats and m_stats["monthly_list"]:
+                    m_list = m_stats["monthly_list"]
+                    periods = [item["Period"] for item in m_list]
+                    vals = [item["Pnl_Cash"] if is_curr_mode else item["Return_Pct"] for item in m_list]
+                    colors = ["#00d09c" if v >= 0 else "#ef4444" for v in vals]
+
+                    fig_m_bar = go.Figure()
+                    fig_m_bar.add_trace(go.Bar(
+                        x=periods,
+                        y=vals,
+                        marker_color=colors,
+                        hovertemplate="Period: %{x}<br>" + ("P&L: ₹%{y:,.0f}" if is_curr_mode else "Return: %{y:+.2f}%") + "<extra></extra>"
+                    ))
+                    fig_m_bar.update_layout(
+                        title=f"Monthly {'Net P&L (₹)' if is_curr_mode else 'Return (%)'} Progression",
+                        template="plotly_dark",
+                        height=350,
+                        margin=dict(l=15, r=15, t=40, b=15),
+                        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", tickangle=-45),
+                        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", title="Net P&L (₹)" if is_curr_mode else "Return (%)"),
+                        plot_bgcolor="#0c1017",
+                        paper_bgcolor="#0c1017"
+                    )
+                    st.plotly_chart(fig_m_bar, use_container_width=True)
+            else:
+                st.info("No monthly data available for this backtest period.")
+
+        # --- TAB 3: CLOSED TRADES LOG ---
+        with tab_trades:
+            if r["closed_trades"]:
+                t_filter_col1, t_filter_col2, t_filter_col3 = st.columns([1.5, 1.5, 1])
+                with t_filter_col1:
+                    filter_trade_outcome = st.radio(
+                        "Outcome Filter",
+                        ["All Trades", "Winning Trades Only", "Losing Trades Only"],
+                        horizontal=True,
+                        key="bt_filter_outcome"
+                    )
+                with t_filter_col2:
+                    unique_syms = ["All Symbols"] + sorted(list(set(t["symbol"] for t in r["closed_trades"])))
+                    filter_trade_sym = st.selectbox("Filter Symbol", unique_syms, key="bt_filter_sym")
+                with t_filter_col3:
+                    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+                    trades_csv = pd.DataFrame(r["closed_trades"]).to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "📥 Export Trades CSV",
+                        data=trades_csv,
+                        file_name=f"strategy1_trades_{r['start_date']}_{r['end_date']}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+                filtered_trades = r["closed_trades"]
+                if "Winning" in filter_trade_outcome:
+                    filtered_trades = [t for t in filtered_trades if t["pnl"] > 0]
+                elif "Losing" in filter_trade_outcome:
+                    filtered_trades = [t for t in filtered_trades if t["pnl"] < 0]
+
+                if filter_trade_sym != "All Symbols":
+                    filtered_trades = [t for t in filtered_trades if t["symbol"] == filter_trade_sym]
+
+                st.caption(f"Showing **{len(filtered_trades)}** of **{len(r['closed_trades'])}** trades")
+
+                display_trades = []
+                for t in filtered_trades:
+                    display_trades.append({
+                        "Symbol": t["symbol"],
+                        "Entry Date": t["entry_date"],
+                        "Entry (₹)": f"₹{t['entry_price']:,.2f}",
+                        "Exit Date": t["exit_date"],
+                        "Exit (₹)": f"₹{t['exit_price']:,.2f}",
+                        "Shares": t["shares"],
+                        "Invested (₹)": f"₹{t['invested']:,.2f}",
+                        "P&L (₹)": f"{'+' if t['pnl'] > 0 else ''}₹{t['pnl']:,.2f}",
+                        "Return (%)": f"{t['pnl_pct']:+.2f}%",
+                        "Hold (Days)": t["holding_days"],
+                        "Entry RSI": t["rsi_at_entry"],
+                        "Outcome": t["outcome"]
+                    })
+
+                st.dataframe(pd.DataFrame(display_trades), use_container_width=True, height=420, hide_index=True)
+            else:
+                st.info("No trades were closed during the chosen backtesting window.")
+
+        # --- TAB 3: OPEN POSITIONS ---
+        with tab_open:
+            if r["open_positions"]:
+                st.markdown(f"#### Active Trades in Portfolio at Simulation End ({len(r['open_positions'])})")
+                st.caption("These positions were still open on the final day of the testing period and are valued at the latest market close.")
+
+                open_disp = []
+                for op in r["open_positions"]:
+                    open_disp.append({
+                        "Symbol": op["symbol"],
+                        "Entry Date": op["entry_date"],
+                        "Entry Price": f"₹{op['entry_price']:,.2f}",
+                        "Current Price": f"₹{op['current_price']:,.2f}",
+                        "Shares": op["shares"],
+                        "Invested": f"₹{op['invested']:,.2f}",
+                        "Current Value": f"₹{op['current_value']:,.2f}",
+                        "Unrealized P&L": f"{'+' if op['unrealized_pnl'] > 0 else ''}₹{op['unrealized_pnl']:,.2f}",
+                        "Unrealized %": f"{op['unrealized_pnl_pct']:+.2f}%",
+                        "Days Held": op["holding_days"],
+                        "Entry RSI": op["rsi_at_entry"]
+                    })
+                st.dataframe(pd.DataFrame(open_disp), use_container_width=True, hide_index=True)
+            else:
+                st.info("No active open positions on the final day. All trades were exited or portfolio is 100% in cash.")
+
+        # --- TAB 4: DRAWDOWN & RISK ANALYTICS ---
+        with tab_analytics:
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                # Underwater Drawdown Curve
+                fig_dd = go.Figure()
+                fig_dd.add_trace(go.Scatter(
+                    x=df_d["Date"],
+                    y=df_d["Drawdown_Pct"],
+                    mode="lines",
+                    name="Drawdown %",
+                    line=dict(color="#ef4444", width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(239, 68, 68, 0.15)",
+                    hovertemplate="Drawdown: %{y:.2f}%<extra></extra>"
+                ))
+                fig_dd.update_layout(
+                    title="Underwater Drawdown Profile",
+                    template="plotly_dark",
+                    height=360,
+                    margin=dict(l=15, r=15, t=40, b=15),
+                    yaxis=dict(title="Drawdown (%)", showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
+                    xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
+                    plot_bgcolor="#0c1017",
+                    paper_bgcolor="#0c1017"
+                )
+                st.plotly_chart(fig_dd, use_container_width=True)
+
+            with col_a2:
+                # Daily Slot Utilization (0 to 10 Active Trades)
+                fig_act = go.Figure()
+                fig_act.add_trace(go.Scatter(
+                    x=df_d["Date"],
+                    y=df_d["ActiveTrades"],
+                    mode="lines",
+                    name="Concurrent Positions",
+                    line=dict(color="#a855f7", width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(168, 85, 247, 0.15)",
+                    hovertemplate="Active Trades: %{y}<extra></extra>"
+                ))
+                fig_act.add_hline(
+                    y=int(bt_max_positions),
+                    line_dash="dot",
+                    line_color="rgba(236, 72, 153, 0.6)",
+                    annotation_text=f"Max Limit ({int(bt_max_positions)})"
+                )
+                fig_act.update_layout(
+                    title="Portfolio Slot Utilization (Concurrent Trades)",
+                    template="plotly_dark",
+                    height=360,
+                    margin=dict(l=15, r=15, t=40, b=15),
+                    yaxis=dict(title="Positions Count", range=[0, int(bt_max_positions)+1], showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
+                    xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
+                    plot_bgcolor="#0c1017",
+                    paper_bgcolor="#0c1017"
+                )
+                st.plotly_chart(fig_act, use_container_width=True)
+
+            if r["closed_trades"]:
+                # Returns Distribution Histogram
+                pnl_returns = [t["pnl_pct"] for t in r["closed_trades"]]
+                fig_dist = px.histogram(
+                    x=pnl_returns,
+                    nbins=30,
+                    labels={"x": "Trade Return (%)"},
+                    title="Trade Return Distribution (%)",
+                    color_discrete_sequence=["#00d09c"]
+                )
+                fig_dist.update_layout(
+                    template="plotly_dark",
+                    height=320,
+                    margin=dict(l=15, r=15, t=40, b=15),
+                    xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", title="Frequency"),
+                    plot_bgcolor="#0c1017",
+                    paper_bgcolor="#0c1017"
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
 
 
 # ---------------------------------------------------------
@@ -1303,8 +2606,7 @@ elif st.session_state.current_page == "Screener":
     top_nav_c1, top_nav_c2 = st.columns([1, 6])
     with top_nav_c1:
         if st.button("← Back", key="scr_back"):
-            st.session_state.current_page = "Home"
-            st.rerun()
+            navigate_to("Home")
     with top_nav_c2:
         st.markdown("<h2 class='gradient-header-text'>Technical Screener</h2>", unsafe_allow_html=True)
 
@@ -1954,8 +3256,7 @@ elif st.session_state.current_page == "Download Stock Data":
     top_c1, top_c2 = st.columns([1, 6])
     with top_c1:
         if st.button("← Back", key="dl_back"):
-            st.session_state.current_page = "Home"
-            st.rerun()
+            navigate_to("Home")
     with top_c2:
         st.markdown("<h2 class='gradient-header-text'>Stock Data & Charts</h2>", unsafe_allow_html=True)
 
