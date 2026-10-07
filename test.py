@@ -3,7 +3,10 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from plotly.subplots import make_subplots
+import io
+import zipfile
 from datetime import date, timedelta
 
 try:
@@ -261,6 +264,26 @@ st.markdown("""
         transform: translateY(-5px);
     }
 
+    .neon-glow-cyan {
+        border: 1px solid rgba(6, 182, 212, 0.35);
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(6, 182, 212, 0.2);
+    }
+    .neon-glow-cyan:hover {
+        border-color: #06b6d4;
+        box-shadow: 0 0 45px -5px rgba(6, 182, 212, 0.5), 0 12px 35px rgba(0, 0, 0, 0.7);
+        transform: translateY(-5px);
+    }
+
+    .neon-glow-amber {
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(245, 158, 11, 0.2);
+    }
+    .neon-glow-amber:hover {
+        border-color: #f59e0b;
+        box-shadow: 0 0 45px -5px rgba(245, 158, 11, 0.5), 0 12px 35px rgba(0, 0, 0, 0.7);
+        transform: translateY(-5px);
+    }
+
     /* Rounded Corner Square Filter Tiles with Light Accent Gradients */
     .filter-tile-card {
         border-radius: 16px;
@@ -389,6 +412,16 @@ st.markdown("""
         background: rgba(236, 72, 153, 0.12);
         color: #f472b6;
         border: 1px solid rgba(236, 72, 153, 0.25);
+    }
+    .badge-cyan {
+        background: rgba(6, 182, 212, 0.12);
+        color: #06b6d4;
+        border: 1px solid rgba(6, 182, 212, 0.3);
+    }
+    .badge-amber {
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
     }
 
     .neon-card-title {
@@ -661,6 +694,10 @@ if "screener_filename" not in st.session_state:
     st.session_state.screener_filename = None
 if "active_tile" not in st.session_state:
     st.session_state.active_tile = None
+if "heatmap_raw_tickers" not in st.session_state:
+    st.session_state.heatmap_raw_tickers = []
+if "heatmap_filename" not in st.session_state:
+    st.session_state.heatmap_filename = None
 
 
 # ---------------------------------------------------------
@@ -691,6 +728,133 @@ def load_stock_data(ticker: str, start: date, end: date, interval: str):
 
 
 # ---------------------------------------------------------
+# Helper function to fetch Heatmap data (cached)
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=600)
+def fetch_heatmap_data(symbols_tuple: tuple, timeframe_choice: str):
+    """
+    Fetches historical OHLCV and market cap data for a set of symbols, cached for fast user experience.
+    """
+    symbols = list(symbols_tuple)
+    if not symbols:
+        return pd.DataFrame()
+
+    period_map = {
+        "Daily": "10d",
+        "Weekly": "1mo",
+        "Monthly": "3mo",
+        "Quarterly": "6mo",
+        "Six-Monthly": "1y",
+        "Yearly": "2y"
+    }
+    fetch_period = period_map.get(timeframe_choice, "1y")
+
+    try:
+        data = yf.download(
+            tickers=symbols,
+            period=fetch_period,
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+            threads=True
+        )
+    except Exception:
+        data = pd.DataFrame()
+
+    tickers_obj = None
+    try:
+        tickers_obj = yf.Tickers(" ".join(symbols))
+    except Exception:
+        pass
+
+    results = []
+
+    for sym in symbols:
+        close_series = None
+        vol_val = 0
+        
+        if not data.empty and "Close" in data:
+            if isinstance(data["Close"], pd.DataFrame) and sym in data["Close"].columns:
+                close_series = data["Close"][sym].dropna()
+                if "Volume" in data and sym in data["Volume"].columns:
+                    v_s = data["Volume"][sym].dropna()
+                    if not v_s.empty:
+                        vol_val = float(v_s.iloc[-1])
+            elif isinstance(data["Close"], pd.Series):
+                close_series = data["Close"].dropna()
+                if "Volume" in data:
+                    v_s = data["Volume"].dropna()
+                    if not v_s.empty:
+                        vol_val = float(v_s.iloc[-1])
+
+        # Fallback to single download if missing
+        if close_series is None or len(close_series) < 2:
+            try:
+                single_df = yf.download(sym, period=fetch_period, interval="1d", progress=False, auto_adjust=False)
+                if not single_df.empty:
+                    if isinstance(single_df.columns, pd.MultiIndex):
+                        single_df.columns = [c[0] if isinstance(c, tuple) else c for c in single_df.columns]
+                    close_series = single_df["Close"].dropna()
+                    if "Volume" in single_df.columns:
+                        vol_val = float(single_df["Volume"].dropna().iloc[-1]) if not single_df["Volume"].dropna().empty else 0
+            except Exception:
+                pass
+
+        if close_series is None or len(close_series) < 2:
+            continue
+
+        current_price = float(close_series.iloc[-1])
+
+        # Determine reference price based on timeframe
+        # Approx trading days: Daily=1, Weekly=5, Monthly=21, Quarterly=63, Six-Monthly=126, Yearly=252
+        bars_back_map = {
+            "Daily": 1,
+            "Weekly": 5,
+            "Monthly": 21,
+            "Quarterly": 63,
+            "Six-Monthly": 126,
+            "Yearly": 252
+        }
+        bars_back = bars_back_map.get(timeframe_choice, 1)
+        ref_idx = max(0, len(close_series) - 1 - bars_back)
+        ref_price = float(close_series.iloc[ref_idx])
+
+        if ref_price > 0:
+            pct_change = ((current_price - ref_price) / ref_price) * 100.0
+        else:
+            pct_change = 0.0
+
+        # Retrieve market cap
+        mcap = 0.0
+        if tickers_obj and hasattr(tickers_obj, "tickers") and sym in tickers_obj.tickers:
+            try:
+                t_inst = tickers_obj.tickers[sym]
+                fast_mc = getattr(t_inst.fast_info, "market_cap", None)
+                if fast_mc is not None and not np.isnan(fast_mc) and fast_mc > 0:
+                    mcap = float(fast_mc)
+            except Exception:
+                pass
+
+        if mcap <= 0:
+            mcap = current_price * (vol_val if vol_val > 0 else 1000000.0)
+
+        clean_symbol = sym.replace(".NS", "").replace(".BO", "")
+        category = "Gainers" if pct_change >= 0 else "Losers"
+
+        results.append({
+            "ticker": clean_symbol,
+            "full_symbol": sym,
+            "price": current_price,
+            "pct_change": round(pct_change, 2),
+            "market_cap": round(mcap, 2),
+            "volume": vol_val,
+            "category": category
+        })
+
+    return pd.DataFrame(results)
+
+
+# ---------------------------------------------------------
 # Top Header Bar
 # ---------------------------------------------------------
 st.markdown("""
@@ -718,8 +882,8 @@ if st.session_state.current_page == "Home":
     </div>
     """, unsafe_allow_html=True)
 
-    # 3 Large Neon Glow Cards (Center Aligned)
-    col_c1, col_c2, col_c3 = st.columns(3, gap="large")
+    # 4 Large Neon Glow Cards (Center Aligned)
+    col_c1, col_c2, col_c3, col_c4 = st.columns(4, gap="medium")
     
     with col_c1:
         st.markdown("""
@@ -753,6 +917,21 @@ if st.session_state.current_page == "Home":
 
     with col_c3:
         st.markdown("""
+        <div class="neon-card neon-glow-cyan">
+            <div>
+                <span class="neon-card-badge badge-cyan">Market • Treemap</span>
+                <div class="neon-card-title">Heatmap</div>
+                <div class="neon-card-desc">Visualize market breadth across Gainers, Losers & Market Cap.</div>
+            </div>
+            <div style="font-size: 0.82rem; font-weight: 700; color: #06b6d4; letter-spacing: 0.5px;">VISUALIZE →</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open Heatmap", key="btn_nav_heatmap", type="primary", use_container_width=True):
+            st.session_state.current_page = "Heatmap"
+            st.rerun()
+
+    with col_c4:
+        st.markdown("""
         <div class="neon-card neon-glow-pink">
             <div>
                 <span class="neon-card-badge badge-pink">Strategy • Simulation</span>
@@ -765,6 +944,333 @@ if st.session_state.current_page == "Home":
         if st.button("Open Backtest", key="btn_nav_backtest", type="secondary", use_container_width=True):
             st.session_state.current_page = "Backtest"
             st.rerun()
+
+
+elif st.session_state.current_page == "Heatmap":
+    top_nav_h1, top_nav_h2 = st.columns([1, 6])
+    with top_nav_h1:
+        if st.button("← Back", key="heatmap_home_back"):
+            st.session_state.current_page = "Home"
+            st.rerun()
+    with top_nav_h2:
+        st.markdown("<h2 class='gradient-header-text'>Market Heatmap</h2>", unsafe_allow_html=True)
+
+    # 2 Sub-Cards: Historical & Live
+    sub_col1, sub_col2 = st.columns(2, gap="large")
+
+    with sub_col1:
+        st.markdown("""
+        <div class="neon-card neon-glow-cyan" style="min-height: 250px;">
+            <div>
+                <span class="neon-card-badge badge-cyan">Custom Portfolio • Multi-TF</span>
+                <div class="neon-card-title">Historical Heatmap</div>
+                <div class="neon-card-desc">Upload ticker CSV to visualize market performance across Gainers, Losers & Market Cap across various timeframes.</div>
+            </div>
+            <div style="font-size: 0.82rem; font-weight: 700; color: #06b6d4; letter-spacing: 0.5px;">VIEW HEATMAP →</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open Historical Heatmap", key="btn_nav_heatmap_hist", type="primary", use_container_width=True):
+            st.session_state.current_page = "Heatmap_Historical"
+            st.rerun()
+
+    with sub_col2:
+        st.markdown("""
+        <div class="neon-card neon-glow-amber" style="min-height: 250px;">
+            <div>
+                <span class="neon-card-badge badge-amber">Real-time Stream</span>
+                <div class="neon-card-title">Live Heatmap</div>
+                <div class="neon-card-desc">Streaming intra-day live tick data and live sector tree maps.</div>
+            </div>
+            <div style="font-size: 0.82rem; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px;">LIVE FEED →</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open Live Heatmap", key="btn_nav_heatmap_live", type="secondary", use_container_width=True):
+            st.session_state.current_page = "Heatmap_Live"
+            st.rerun()
+
+
+# ---------------------------------------------------------
+# LIVE HEATMAP PAGE (UNDER CONSTRUCTION)
+# ---------------------------------------------------------
+elif st.session_state.current_page == "Heatmap_Live":
+    top_nav_l1, top_nav_l2 = st.columns([1, 6])
+    with top_nav_l1:
+        if st.button("← Back", key="heatmap_live_back"):
+            st.session_state.current_page = "Heatmap"
+            st.rerun()
+    with top_nav_l2:
+        st.markdown("<h2 class='gradient-header-text'>Live Market Heatmap</h2>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="neon-card neon-glow-amber" style="margin-top: 16px; padding: 48px; text-align: center; align-items: center;">
+        <span class="neon-card-badge badge-amber">Under Construction</span>
+        <div class="neon-card-title" style="margin-top: 14px; font-size: 1.8rem;">Live Heatmap Under Construction</div>
+        <div class="neon-card-desc" style="max-width: 560px; margin: 12px auto; font-size: 0.95rem; color: #94a3b8;">
+            Live tick websocket stream and real-time intraday heatmap visualizer is currently under construction. Please check back soon or explore the Historical Heatmap!
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------
+# HISTORICAL HEATMAP PAGE
+# ---------------------------------------------------------
+elif st.session_state.current_page == "Heatmap_Historical":
+    top_nav_hh1, top_nav_hh2 = st.columns([1, 6])
+    with top_nav_hh1:
+        if st.button("← Back", key="heatmap_hist_back"):
+            st.session_state.current_page = "Heatmap"
+            st.rerun()
+    with top_nav_hh2:
+        st.markdown("<h2 class='gradient-header-text'>Historical Market Heatmap</h2>", unsafe_allow_html=True)
+
+    # File Uploader and Controls in an Expander
+    with st.expander("Tickers & Heatmap Settings", expanded=(len(st.session_state.heatmap_raw_tickers) == 0)):
+        col_hu1, col_hu2 = st.columns([2, 1])
+        with col_hu1:
+            hm_uploaded_file = st.file_uploader("Upload CSV containing stock tickers", type=["csv"], key="heatmap_uploader")
+            # 30 liquid Nifty 50 sample stocks
+            nifty_30_sample = [
+                "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+                "BHARTIARTL", "ITC", "LT", "TATAMOTORS", "MARUTI", "BAJFINANCE",
+                "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+                "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+                "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M"
+            ]
+
+            sample_btn_col1, sample_btn_col2 = st.columns([1.2, 1])
+            with sample_btn_col1:
+                if st.button("🚀 Run Sample Stocks (30 Nifty Stocks)", key="btn_run_sample_stocks", use_container_width=True):
+                    st.session_state.heatmap_raw_tickers = nifty_30_sample
+                    st.session_state.heatmap_filename = "Nifty 50 (30 Sample Stocks)"
+                    st.rerun()
+            with sample_btn_col2:
+                if st.session_state.heatmap_filename:
+                    if st.button("🔄 Reset Portfolio", key="btn_reset_hm_stocks", use_container_width=True):
+                        st.session_state.heatmap_raw_tickers = []
+                        st.session_state.heatmap_filename = None
+                        st.rerun()
+
+            if st.session_state.heatmap_filename:
+                st.caption(f"✓ Active Portfolio: **{st.session_state.heatmap_filename}** ({len(st.session_state.heatmap_raw_tickers)} stocks)")
+        with col_hu2:
+            hm_exchange = st.selectbox("Exchange Suffix", ["NSE (.NS)", "BSE (.BO)", "US / None"], index=0, key="hm_exchange")
+
+        if hm_uploaded_file is not None:
+            try:
+                hm_uploaded_file.seek(0)
+                csv_df = pd.read_csv(hm_uploaded_file)
+                found_col = None
+                for col_name in ["symbol", "ticker", "stock", "symbols", "tickers", "stocks", "name", "tradingsymbol"]:
+                    for actual_col in csv_df.columns:
+                        if str(actual_col).strip().lower() == col_name:
+                            found_col = actual_col
+                            break
+                    if found_col:
+                        break
+                if found_col is None:
+                    found_col = csv_df.columns[0]
+
+                parsed_tickers = (
+                    csv_df[found_col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .str.upper()
+                    .tolist()
+                )
+                parsed_tickers = [t for t in parsed_tickers if t and t not in ["SYMBOL", "TICKER", "STOCK", "NAME"]]
+                if parsed_tickers:
+                    st.session_state.heatmap_raw_tickers = parsed_tickers
+                    st.session_state.heatmap_filename = hm_uploaded_file.name
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error parsing CSV: {e}")
+
+    # Fallback to default 30 Nifty sample stocks if nothing loaded yet
+    current_tickers = st.session_state.heatmap_raw_tickers
+    if not current_tickers:
+        current_tickers = [
+            "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+            "BHARTIARTL", "ITC", "LT", "TATAMOTORS", "MARUTI", "BAJFINANCE",
+            "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+            "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+            "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M"
+        ]
+
+    # Format tickers according to exchange
+    def format_hm_ticker(tick: str, ex_setting: str) -> str:
+        tick = tick.strip().upper()
+        if "NSE" in ex_setting and not tick.endswith(".NS"):
+            return f"{tick.split('.')[0]}.NS"
+        elif "BSE" in ex_setting and not tick.endswith(".BO"):
+            return f"{tick.split('.')[0]}.BO"
+        return tick
+
+    formatted_symbols = [format_hm_ticker(t, hm_exchange) for t in current_tickers]
+    formatted_symbols = list(dict.fromkeys(formatted_symbols))  # Remove duplicates
+
+    # Heatmap Controls Bar
+    ctrl_col1, ctrl_col2 = st.columns([1, 1])
+    with ctrl_col1:
+        timeframe_choice = st.selectbox(
+            "Timeframe",
+            ["Daily", "Weekly", "Monthly", "Quarterly", "Six-Monthly", "Yearly"],
+            index=0,
+            key="hm_timeframe"
+        )
+    with ctrl_col2:
+        slice_by = st.selectbox(
+            "Slice by",
+            ["Gainers", "Losers", "Market Cap"],
+            index=0,
+            key="hm_slice_by"
+        )
+
+    # Fetch cached data
+    with st.spinner("Fetching and caching stock performance data..."):
+        hm_df = fetch_heatmap_data(tuple(formatted_symbols), timeframe_choice)
+
+    if hm_df.empty:
+        st.warning("No price data retrieved for the selected stocks. Please verify ticker symbols.")
+    else:
+        # Filter / Slice dataframe and set box sizing directly based on Slice by
+        if slice_by == "Gainers":
+            filtered_df = hm_df[hm_df["pct_change"] >= 0].copy()
+            if filtered_df.empty:
+                st.info("No gainers found for the selected timeframe. Showing all stocks.")
+                filtered_df = hm_df.copy()
+            filtered_df["box_size"] = filtered_df["pct_change"].apply(lambda x: max(abs(x), 0.05))
+        elif slice_by == "Losers":
+            filtered_df = hm_df[hm_df["pct_change"] < 0].copy()
+            if filtered_df.empty:
+                st.info("No losers found for the selected timeframe. Showing all stocks.")
+                filtered_df = hm_df.copy()
+            filtered_df["box_size"] = filtered_df["pct_change"].apply(lambda x: max(abs(x), 0.05))
+        else:  # Market Cap
+            filtered_df = hm_df.copy()
+            filtered_df["box_size"] = filtered_df["market_cap"].apply(lambda x: max(float(x), 1.0))
+
+        # Market Summary Stat Pills
+        total_stocks = len(filtered_df)
+        total_gainers = len(filtered_df[filtered_df["pct_change"] >= 0])
+        total_losers = len(filtered_df[filtered_df["pct_change"] < 0])
+        avg_change = filtered_df["pct_change"].mean() if not filtered_df.empty else 0.0
+
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        stat_col1.metric("Stocks Displayed", f"{total_stocks}")
+        stat_col2.metric("Gainers (▲)", f"{total_gainers}", delta=f"{total_gainers}/{total_stocks}")
+        stat_col3.metric("Losers (▼)", f"{total_losers}", delta=f"-{total_losers}", delta_color="inverse")
+        stat_col4.metric("Avg Change", f"{avg_change:+.2f}%", delta=f"{avg_change:+.2f}%")
+
+        # Human readable format for tooltip
+        def format_mcap_display(val):
+            if val >= 1e12:
+                return f"₹{val / 1e12:.2f}T"
+            elif val >= 1e7:
+                return f"₹{val / 1e7:.2f}Cr"
+            return f"₹{val:,.0f}"
+
+        filtered_df["mcap_formatted"] = filtered_df["market_cap"].apply(format_mcap_display)
+        filtered_df["change_label"] = filtered_df["pct_change"].apply(lambda x: f"{'+' if x >= 0 else ''}{x:.2f}%")
+        filtered_df["custom_label"] = (
+            filtered_df["ticker"] + "<br>" +
+            "₹" + filtered_df["price"].map("{:,.2f}".format) + "<br>" +
+            filtered_df["change_label"]
+        )
+
+        # Dynamic Color Scaling:
+        # Gainers: least gainer = light green, top gainer = deep emerald green
+        # Losers: least loser (near 0) = light red/coral, top loser (deep negative) = deep dark red
+        # Mixed (Market Cap): deep red -> light red -> light green -> deep green
+        if slice_by == "Gainers":
+            min_p = float(filtered_df["pct_change"].min())
+            max_p = float(filtered_df["pct_change"].max())
+            if min_p == max_p:
+                min_p = max(0.0, max_p - 1.0)
+                max_p = max_p + 1.0
+            range_bounds = [min_p, max_p]
+            color_scale = [
+                [0.0, "#a7f3d0"],  # Light pastel mint/green for least gainer
+                [0.5, "#10b981"],  # Medium green
+                [1.0, "#064e3b"]   # Deep emerald/forest green for top gainer
+            ]
+            cmid = None
+        elif slice_by == "Losers":
+            min_p = float(filtered_df["pct_change"].min())  # Most negative (top loser)
+            max_p = float(filtered_df["pct_change"].max())  # Least negative (least loser)
+            if min_p == max_p:
+                min_p = min_p - 1.0
+                max_p = min(0.0, max_p + 1.0)
+            range_bounds = [min_p, max_p]
+            color_scale = [
+                [0.0, "#7f1d1d"],  # Deep crimson / dark red for top loser (most negative)
+                [0.5, "#ef4444"],  # Medium red
+                [1.0, "#fecaca"]   # Light soft red / pastel coral for least loser (closest to 0)
+            ]
+            cmid = None
+        else:
+            # Market Cap (contains both Gainers and Losers)
+            max_abs_pct = max(float(filtered_df["pct_change"].abs().max()), 2.0)
+            range_bounds = [-max_abs_pct, max_abs_pct]
+            color_scale = [
+                [0.0, "#7f1d1d"],  # Deep red (top loser)
+                [0.35, "#ef4444"], # Medium red
+                [0.48, "#fecaca"], # Light red
+                [0.50, "#1e293b"], # Neutral midpoint near 0%
+                [0.52, "#a7f3d0"], # Light green
+                [0.70, "#10b981"], # Medium green
+                [1.0, "#064e3b"]   # Deep green (top gainer)
+            ]
+            cmid = 0.0
+
+        treemap_kwargs = {
+            "data_frame": filtered_df,
+            "path": ["ticker"],
+            "values": "box_size",
+            "color": "pct_change",
+            "color_continuous_scale": color_scale,
+            "range_color": range_bounds,
+            "hover_data": {
+                "box_size": False,
+                "category": False,
+                "ticker": True,
+                "price": ":,.2f",
+                "pct_change": ":+.2f",
+                "mcap_formatted": True
+            }
+        }
+        if cmid is not None:
+            treemap_kwargs["color_continuous_midpoint"] = cmid
+
+        fig_hm = px.treemap(**treemap_kwargs)
+
+        fig_hm.update_traces(
+            textinfo="label",
+            texttemplate="<b>%{label}</b><br>%{customdata[2]:+.2f}%<br>₹%{customdata[1]:,.1f}",
+            customdata=filtered_df[["ticker", "price", "pct_change", "mcap_formatted"]].values,
+            hovertemplate="<b>%{customdata[0]}</b><br>Price: ₹%{customdata[1]:,.2f}<br>Change: %{customdata[2]:+.2f}%<br>Market Cap: %{customdata[3]}<extra></extra>",
+            marker=dict(
+                cornerradius=6,
+                pad=dict(t=3, l=3, r=3, b=3)
+            )
+        )
+
+        fig_hm.update_layout(
+            template="plotly_dark",
+            height=650,
+            margin=dict(l=10, r=10, t=20, b=10),
+            plot_bgcolor="#0c1017",
+            paper_bgcolor="#0c1017",
+            coloraxis_colorbar=dict(
+                title=f"Change % ({timeframe_choice})",
+                ticksuffix="%",
+                len=0.7,
+                thickness=15
+            )
+        )
+
+        st.plotly_chart(fig_hm, use_container_width=True)
 
 
 # ---------------------------------------------------------
@@ -806,9 +1312,33 @@ elif st.session_state.current_page == "Screener":
     with st.expander("Tickers & Exchange", expanded=(st.session_state.screener_cache is None)):
         col_u1, col_u2 = st.columns([2, 1])
         with col_u1:
-            uploaded_file = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
-            sample_csv_data = "Ticker\nRELIANCE\nTCS\nINFY\nHDFCBANK\nICICIBANK\nSBIN\nBHARTIARTL\nITC\nLT\nTATAMOTORS\nMARUTI\nBAJFINANCE\n"
-            st.download_button("Sample CSV", sample_csv_data, "sample_tickers.csv", "text/csv")
+            uploaded_file = st.file_uploader("Upload CSV", type=["csv"], key="screener_uploader")
+            # 30 liquid Nifty 50 sample stocks
+            nifty_30_sample_screener = [
+                "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+                "BHARTIARTL", "ITC", "LT", "TATAMOTORS", "MARUTI", "BAJFINANCE",
+                "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+                "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+                "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M"
+            ]
+
+            scr_btn_col1, scr_btn_col2 = st.columns([1.2, 1])
+            with scr_btn_col1:
+                if st.button("🚀 Run Sample Stocks (30 Nifty Stocks)", key="btn_run_screener_sample", use_container_width=True):
+                    st.session_state.screener_raw_tickers = nifty_30_sample_screener
+                    st.session_state.screener_filename = "Nifty 50 (30 Sample Stocks)"
+                    st.session_state.screener_cache = None
+                    st.rerun()
+            with scr_btn_col2:
+                if st.session_state.screener_filename:
+                    if st.button("🔄 Reset Portfolio", key="btn_reset_screener_stocks", use_container_width=True):
+                        st.session_state.screener_raw_tickers = []
+                        st.session_state.screener_filename = None
+                        st.session_state.screener_cache = None
+                        st.rerun()
+
+            if st.session_state.screener_filename:
+                st.caption(f"✓ Active Portfolio: **{st.session_state.screener_filename}** ({len(st.session_state.screener_raw_tickers)} stocks)")
         with col_u2:
             screener_exchange = st.selectbox("Exchange", ["NSE (.NS)", "BSE (.BO)", "US / None"], index=0)
             screener_timeframe = st.selectbox("Timeframe", ["Daily", "Weekly"], index=0)
@@ -1429,79 +1959,203 @@ elif st.session_state.current_page == "Download Stock Data":
     with top_c2:
         st.markdown("<h2 class='gradient-header-text'>Stock Data & Charts</h2>", unsafe_allow_html=True)
 
-    # Inputs bar
-    with st.container():
-        c_ex, c_tk, c_from, c_to, c_tf = st.columns([1.2, 1.8, 1.2, 1.2, 1.1])
-        with c_ex:
-            exchange = st.selectbox("Exchange", ["NSE", "BSE", "US / Global"], index=0)
-        
-        if exchange == "NSE":
-            exchange_suffix = ".NS"
-            currency_symbol = "₹"
-        elif exchange == "BSE":
-            exchange_suffix = ".BO"
-            currency_symbol = "₹"
-        else:
-            exchange_suffix = ""
-            currency_symbol = "$"
+    tab_single, tab_batch = st.tabs(["Single Stock Analysis", "Batch Download (CSV Upload)"])
 
-        with c_tk:
-            stock_opts = [f"{sym} ({name})" for sym, name in POPULAR_NSE_STOCKS.items()] + ["Custom..."]
-            selected_option = st.selectbox("Stock", stock_opts, index=0)
-            if selected_option == "Custom...":
-                raw_ticker = st.text_input("Ticker", value="RELIANCE").strip().upper()
+    with tab_single:
+        # Inputs bar
+        with st.container():
+            c_ex, c_tk, c_from, c_to, c_tf = st.columns([1.2, 1.8, 1.2, 1.2, 1.1])
+            with c_ex:
+                exchange = st.selectbox("Exchange", ["NSE", "BSE", "US / Global"], index=0, key="single_ex")
+            
+            if exchange == "NSE":
+                exchange_suffix = ".NS"
+                currency_symbol = "₹"
+            elif exchange == "BSE":
+                exchange_suffix = ".BO"
+                currency_symbol = "₹"
             else:
-                raw_ticker = selected_option.split(" (")[0].strip()
+                exchange_suffix = ""
+                currency_symbol = "$"
 
-            def format_ticker(t: str, sfx: str) -> str:
-                t = t.strip().upper()
-                if not t:
-                    return ""
-                if sfx:
-                    if not t.endswith(sfx):
-                        if "." in t:
-                            return f"{t.split('.')[0]}{sfx}"
-                        return f"{t}{sfx}"
-                    return t
+            with c_tk:
+                stock_opts = [f"{sym} ({name})" for sym, name in POPULAR_NSE_STOCKS.items()] + ["Custom..."]
+                selected_option = st.selectbox("Stock", stock_opts, index=0, key="single_stock_sel")
+                if selected_option == "Custom...":
+                    raw_ticker = st.text_input("Ticker", value="RELIANCE", key="single_custom_tick").strip().upper()
                 else:
-                    if t.endswith(".NS") or t.endswith(".BO"):
-                        return t.split(".")[0]
-                    return t
+                    raw_ticker = selected_option.split(" (")[0].strip()
 
-            final_ticker = format_ticker(raw_ticker, exchange_suffix)
+                def format_ticker(t: str, sfx: str) -> str:
+                    t = t.strip().upper()
+                    if not t:
+                        return ""
+                    if sfx:
+                        if not t.endswith(sfx):
+                            if "." in t:
+                                return f"{t.split('.')[0]}{sfx}"
+                            return f"{t}{sfx}"
+                        return t
+                    else:
+                        if t.endswith(".NS") or t.endswith(".BO"):
+                            return t.split(".")[0]
+                        return t
 
-        today = date.today()
-        default_start = today - timedelta(days=365)
-        with c_from:
-            start_date = st.date_input("From", value=default_start, max_value=today)
-        with c_to:
-            end_date = st.date_input("To", value=today, min_value=start_date, max_value=today)
-        with c_tf:
-            timeframe_choice = st.selectbox("Timeframe", ["Daily", "Weekly", "Monthly"], index=0)
-            tf_map = {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}
-            selected_interval = tf_map[timeframe_choice]
+                final_ticker = format_ticker(raw_ticker, exchange_suffix)
 
-        if st.button("Fetch Data", type="primary"):
-            if final_ticker and start_date <= end_date:
-                with st.spinner("Loading..."):
-                    try:
-                        data = load_stock_data(final_ticker, start_date, end_date, selected_interval)
-                        if data is None or data.empty:
-                            st.error(f"No data found for {final_ticker}")
-                            st.session_state.stock_data = None
-                            st.session_state.query_info = None
-                        else:
-                            st.session_state.stock_data = data
-                            st.session_state.query_info = {
-                                "ticker": final_ticker,
-                                "raw_ticker": raw_ticker,
-                                "start_date": start_date,
-                                "end_date": end_date,
-                                "timeframe": timeframe_choice,
-                                "currency": currency_symbol
-                            }
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            today = date.today()
+            default_start = today - timedelta(days=365)
+            with c_from:
+                start_date = st.date_input("From", value=default_start, max_value=today, key="single_from")
+            with c_to:
+                end_date = st.date_input("To", value=today, min_value=start_date, max_value=today, key="single_to")
+            with c_tf:
+                timeframe_choice = st.selectbox("Timeframe", ["Daily", "Weekly", "Monthly"], index=0, key="single_tf")
+                tf_map = {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}
+                selected_interval = tf_map[timeframe_choice]
+
+            if st.button("Fetch Data", type="primary", key="btn_single_fetch"):
+                if final_ticker and start_date <= end_date:
+                    with st.spinner("Loading..."):
+                        try:
+                            data = load_stock_data(final_ticker, start_date, end_date, selected_interval)
+                            if data is None or data.empty:
+                                st.error(f"No data found for {final_ticker}")
+                                st.session_state.stock_data = None
+                                st.session_state.query_info = None
+                            else:
+                                st.session_state.stock_data = data
+                                st.session_state.query_info = {
+                                    "ticker": final_ticker,
+                                    "raw_ticker": raw_ticker,
+                                    "start_date": start_date,
+                                    "end_date": end_date,
+                                    "timeframe": timeframe_choice,
+                                    "currency": currency_symbol
+                                }
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+    with tab_batch:
+        st.markdown("<p style='color: #94a3b8; font-size: 0.95rem; margin-bottom: 12px;'>Upload a CSV file with stock tickers to fetch historical OHLCV data in batch and download them packaged together into a single <b>ZIP file</b> containing individual CSV files.</p>", unsafe_allow_html=True)
+        
+        batch_col1, batch_col2 = st.columns([2, 1])
+        with batch_col1:
+            batch_csv_file = st.file_uploader("Upload CSV containing stock tickers", type=["csv"], key="batch_stock_csv")
+        with batch_col2:
+            batch_exchange = st.selectbox("Exchange Suffix", ["NSE (.NS)", "BSE (.BO)", "US / None"], index=0, key="batch_exchange")
+
+        batch_from_col, batch_to_col, batch_tf_col = st.columns(3)
+        today_b = date.today()
+        with batch_from_col:
+            batch_start = st.date_input("From Date", value=today_b - timedelta(days=365), max_value=today_b, key="batch_from_date")
+        with batch_to_col:
+            batch_end = st.date_input("To Date", value=today_b, min_value=batch_start, max_value=today_b, key="batch_to_date")
+        with batch_tf_col:
+            batch_tf = st.selectbox("Timeframe", ["Daily", "Weekly", "Monthly"], index=0, key="batch_tf_choice")
+            batch_interval = {"Daily": "1d", "Weekly": "1wk", "Monthly": "1mo"}[batch_tf]
+
+        parsed_batch_tickers = []
+        if batch_csv_file is not None:
+            try:
+                batch_csv_file.seek(0)
+                b_df = pd.read_csv(batch_csv_file)
+                found_b_col = None
+                for col_name in ["symbol", "ticker", "stock", "symbols", "tickers", "stocks", "name", "tradingsymbol"]:
+                    for actual_col in b_df.columns:
+                        if str(actual_col).strip().lower() == col_name:
+                            found_b_col = actual_col
+                            break
+                    if found_b_col:
+                        break
+                if found_b_col is None:
+                    found_b_col = b_df.columns[0]
+
+                raw_parsed = (
+                    b_df[found_b_col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .str.upper()
+                    .tolist()
+                )
+                parsed_batch_tickers = [t for t in raw_parsed if t and t not in ["SYMBOL", "TICKER", "STOCK", "NAME"]]
+                if parsed_batch_tickers:
+                    st.caption(f"✓ Found **{len(parsed_batch_tickers)} tickers** in `{batch_csv_file.name}`")
+            except Exception as e:
+                st.error(f"Error reading CSV: {e}")
+
+        # Quick sample button option
+        if not parsed_batch_tickers:
+            if st.button("🚀 Load 30 Benchmark Nifty Stocks for Batch", key="btn_load_batch_sample"):
+                parsed_batch_tickers = [
+                    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+                    "BHARTIARTL", "ITC", "LT", "TATAMOTORS", "MARUTI", "BAJFINANCE",
+                    "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+                    "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+                    "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M"
+                ]
+                st.session_state["batch_sample_active"] = True
+
+        if st.session_state.get("batch_sample_active", False) and not parsed_batch_tickers:
+            parsed_batch_tickers = [
+                "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN",
+                "BHARTIARTL", "ITC", "LT", "TATAMOTORS", "MARUTI", "BAJFINANCE",
+                "AXISBANK", "SUNPHARMA", "TITAN", "KOTAKBANK", "ULTRACEMCO", "WIPRO",
+                "NTPC", "POWERGRID", "HINDUNILVR", "JSWSTEEL", "TATASTEEL", "ADANIENT",
+                "ADANIPORTS", "COALINDIA", "BAJAJFINSV", "NESTLEIND", "ONGC", "M&M"
+            ]
+
+        def format_batch_symbol(tick: str, ex_setting: str) -> str:
+            tick = tick.strip().upper()
+            if "NSE" in ex_setting and not tick.endswith(".NS"):
+                return f"{tick.split('.')[0]}.NS"
+            elif "BSE" in ex_setting and not tick.endswith(".BO"):
+                return f"{tick.split('.')[0]}.BO"
+            return tick
+
+        if parsed_batch_tickers:
+            unique_batch_symbols = list(dict.fromkeys([format_batch_symbol(t, batch_exchange) for t in parsed_batch_tickers]))
+            st.info(f"Ready to download **{len(unique_batch_symbols)} tickers** ({batch_tf} interval, from {batch_start} to {batch_end})")
+            
+            if st.button("📦 Start Batch Download & Create ZIP", type="primary", key="btn_start_batch_zip"):
+                zip_buffer = io.BytesIO()
+                success_count = 0
+                failed_symbols = []
+                batch_prog = st.progress(0, text="Fetching batch data...")
+
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for idx, sym in enumerate(unique_batch_symbols):
+                        batch_prog.progress(
+                            int(((idx + 1) / len(unique_batch_symbols)) * 100),
+                            text=f"Downloading {sym} ({idx+1}/{len(unique_batch_symbols)})..."
+                        )
+                        clean_fn = sym.replace(".NS", "").replace(".BO", "")
+                        try:
+                            s_data = load_stock_data(sym, batch_start, batch_end, batch_interval)
+                            if s_data is not None and not s_data.empty:
+                                csv_str = s_data.to_csv(index=False)
+                                zf.writestr(f"{clean_fn}_{batch_tf.lower()}.csv", csv_str)
+                                success_count += 1
+                            else:
+                                failed_symbols.append(sym)
+                        except Exception:
+                            failed_symbols.append(sym)
+
+                batch_prog.empty()
+                if success_count > 0:
+                    zip_buffer.seek(0)
+                    zip_bytes = zip_buffer.getvalue()
+                    st.success(f"Successfully packaged **{success_count} stocks** into ZIP archive!")
+                    st.download_button(
+                        label=f"💾 Download {success_count} Stocks ZIP",
+                        data=zip_bytes,
+                        file_name=f"stocks_batch_{batch_tf.lower()}_{date.today().strftime('%Y%m%d')}.zip",
+                        mime="application/zip",
+                        type="primary"
+                    )
+                if failed_symbols:
+                    st.warning(f"Could not retrieve data for {len(failed_symbols)} tickers: {', '.join(failed_symbols[:10])}")
 
     # Results Display
     if st.session_state.stock_data is not None and st.session_state.query_info is not None:
